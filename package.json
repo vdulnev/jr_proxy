@@ -1,0 +1,10 @@
+{
+  "name": "jr_proxy",
+  "version": "0.1.0",
+  "private": true,
+  "description": "HTTP proxy that re-encodes JRiver PCM s16le to FLAC via ffmpeg",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  }
+}

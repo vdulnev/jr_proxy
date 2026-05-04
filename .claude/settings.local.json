@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ffmpeg -version)",
+      "Bash(node --check \"c:/Users/user/src/jr_proxy/server.js\")",
+      "Bash(PORT=18080 timeout 3 node server.js)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(PORT=18082 timeout 3 node server.js)"
+    ]
+  }
+}
