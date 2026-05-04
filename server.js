@@ -17,6 +17,16 @@ const DEBUG = process.env.DEBUG === '1';
 
 fs.mkdirSync(CACHE_DIR, { recursive: true });
 
+function cleanCache() {
+  let removed = 0;
+  for (const name of fs.readdirSync(CACHE_DIR)) {
+    if (!/^flac_[a-f0-9]+\.flac(\.tmp\..+)?$/.test(name)) continue;
+    try { fs.unlinkSync(path.join(CACHE_DIR, name)); removed++; } catch (_) {}
+  }
+  if (removed) console.log(`cache cleanup: removed ${removed} file(s) from ${CACHE_DIR}`);
+}
+cleanCache();
+
 const baseUrl = new URL(JRIVER_BASE);
 const upstreamLib = baseUrl.protocol === 'https:' ? https : http;
 const BODYLESS_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'DELETE']);
