@@ -20,7 +20,7 @@ fs.mkdirSync(CACHE_DIR, { recursive: true });
 function cleanCache() {
   let removed = 0;
   for (const name of fs.readdirSync(CACHE_DIR)) {
-    if (!/^flac_[a-f0-9]+\.flac(\.tmp\..+)?$/.test(name)) continue;
+    if (!/^(flac|opus\d+)_[a-f0-9]+\.(flac|m4a)(\.tmp\..+)?$/.test(name)) continue;
     try { fs.unlinkSync(path.join(CACHE_DIR, name)); removed++; } catch (_) {}
   }
   if (removed) console.log(`cache cleanup: removed ${removed} file(s) from ${CACHE_DIR}`);
@@ -47,22 +47,61 @@ function copyHeaders(src, drop = HOP_BY_HOP) {
   return out;
 }
 
-function isWavAudioRequest(reqUrl) {
-  if (!reqUrl.pathname.toLowerCase().endsWith('/mcws/v1/file/getfile')) return false;
+function transcodeSpec(reqUrl) {
+  if (!reqUrl.pathname.toLowerCase().endsWith('/mcws/v1/file/getfile')) return null;
   const conv = (reqUrl.searchParams.get('Conversion') || '').toLowerCase();
-  return conv === 'wav';
+  const quality = (reqUrl.searchParams.get('Quality') || '').toLowerCase();
+
+  if (conv === 'opus') {
+    const bitrateMap = { high: 160, normal: 96, low: 64 };
+    const kbps = bitrateMap[quality] || 96;
+    return {
+      ext: 'm4a',
+      contentType: 'audio/mp4',
+      cachePrefix: `opus${kbps}`,
+      streamable: false,
+      ffmpegOutputArgs: [
+        '-c:a', 'libopus',
+        '-b:a', `${kbps}k`,
+        '-vbr', 'on',
+        '-movflags', '+faststart',
+        '-f', 'mp4',
+      ],
+    };
+  }
+
+  if (conv === 'wav') {
+    return {
+      ext: 'flac',
+      contentType: 'audio/flac',
+      cachePrefix: 'flac',
+      streamable: true,
+      ffmpegOutputArgs: [
+        '-f', 'flac',
+        '-compression_level', FLAC_LEVEL,
+      ],
+    };
+  }
+
+  return null;
 }
 
-function cacheKey(reqUrl) {
+function cacheFilename(reqUrl, spec) {
   const sp = reqUrl.searchParams;
   const parts = [
     sp.get('File') || '',
     sp.get('FileType') || '',
-    sp.get('Conversion') || '',
-    sp.get('Quality') || '',
+    spec.cachePrefix,
   ].join('|');
   const hash = crypto.createHash('sha1').update(parts).digest('hex').slice(0, 16);
-  return `flac_${hash}.flac`;
+  return `${spec.cachePrefix}_${hash}.${spec.ext}`;
+}
+
+function upstreamPathFor(reqUrl) {
+  // We always need WAV from JRiver for transcoding; rewrite Conversion accordingly.
+  const u = new URL(reqUrl.toString());
+  u.searchParams.set('Conversion', 'wav');
+  return u.pathname + u.search;
 }
 
 function upstreamGet(pathAndQuery, clientHeaders) {
@@ -92,24 +131,24 @@ function upstreamGet(pathAndQuery, clientHeaders) {
 
 const encodingPromises = new Map();
 
-function encodeToCache(reqUrl, clientHeaders, label) {
+function encodeToCache(reqUrl, clientHeaders, label, spec) {
   const tag = `[ff ${label}]`;
-  const finalPath = path.join(CACHE_DIR, cacheKey(reqUrl));
+  const finalPath = path.join(CACHE_DIR, cacheFilename(reqUrl, spec));
   const tmpPath = `${finalPath}.tmp.${process.pid}.${label}`;
 
   return (async () => {
     const t0 = Date.now();
-    const upstreamRes = await upstreamGet(reqUrl.pathname + reqUrl.search, clientHeaders);
+    const upstreamRes = await upstreamGet(upstreamPathFor(reqUrl), clientHeaders);
     if (upstreamRes.statusCode < 200 || upstreamRes.statusCode >= 300) {
       upstreamRes.resume();
       throw new Error(`upstream HTTP ${upstreamRes.statusCode}`);
     }
-    log(`${tag} encoding upstreamLen=${upstreamRes.headers['content-length'] || '?'} -> ${finalPath}`);
+    log(`${tag} encoding ${spec.cachePrefix} upstreamLen=${upstreamRes.headers['content-length'] || '?'} -> ${finalPath}`);
 
     const ff = spawn(FFMPEG, [
       '-hide_banner', '-loglevel', 'warning',
       '-i', 'pipe:0',
-      '-f', 'flac', '-compression_level', FLAC_LEVEL,
+      ...spec.ffmpegOutputArgs,
       '-y', tmpPath,
     ], { stdio: ['pipe', 'ignore', 'pipe'] });
 
@@ -143,8 +182,8 @@ function encodeToCache(reqUrl, clientHeaders, label) {
   })();
 }
 
-async function ensureCached(reqUrl, clientHeaders, label) {
-  const key = cacheKey(reqUrl);
+async function ensureCached(reqUrl, clientHeaders, label, spec) {
+  const key = cacheFilename(reqUrl, spec);
   const finalPath = path.join(CACHE_DIR, key);
 
   try {
@@ -156,13 +195,13 @@ async function ensureCached(reqUrl, clientHeaders, label) {
 
   if (encodingPromises.has(key)) return encodingPromises.get(key);
 
-  const p = encodeToCache(reqUrl, clientHeaders, label);
+  const p = encodeToCache(reqUrl, clientHeaders, label, spec);
   encodingPromises.set(key, p);
   p.finally(() => encodingPromises.delete(key));
   return p;
 }
 
-function serveCachedFile(filePath, clientReq, clientRes, label) {
+function serveCachedFile(filePath, clientReq, clientRes, label, spec) {
   fs.stat(filePath, (err, stat) => {
     if (err) {
       log(`[serve ${label}] stat failed: ${err.message}`);
@@ -174,7 +213,7 @@ function serveCachedFile(filePath, clientReq, clientRes, label) {
     }
 
     const baseHeaders = {
-      'content-type': 'audio/flac',
+      'content-type': spec.contentType,
       'accept-ranges': 'bytes',
       'cache-control': 'no-store',
     };
@@ -220,11 +259,11 @@ function serveCachedFile(filePath, clientReq, clientRes, label) {
   });
 }
 
-async function handleTranscodeCached(reqUrl, clientReq, clientRes, label) {
+async function handleTranscodeCached(reqUrl, clientReq, clientRes, label, spec) {
   try {
-    const cachedPath = await ensureCached(reqUrl, clientReq.headers, label);
+    const cachedPath = await ensureCached(reqUrl, clientReq.headers, label, spec);
     if (clientReq.destroyed) return;
-    serveCachedFile(cachedPath, clientReq, clientRes, label);
+    serveCachedFile(cachedPath, clientReq, clientRes, label, spec);
   } catch (err) {
     log(`[transcode ${label}] failed: ${err.message}`);
     if (!clientRes.headersSent) {
@@ -310,17 +349,18 @@ let reqSeq = 0;
 
 const server = http.createServer((clientReq, clientRes) => {
   const reqUrl = new URL(clientReq.url, `http://${clientReq.headers.host || 'x'}`);
-  const willTranscode = isWavAudioRequest(reqUrl);
+  const spec = transcodeSpec(reqUrl);
   const reqId = (++reqSeq).toString(36);
 
-  if (willTranscode && BUFFER === 'disk') {
-    log(`transcode #${reqId} mode=disk ${clientReq.method} ${clientReq.url} range=${clientReq.headers.range || '-'}`);
-    handleTranscodeCached(reqUrl, clientReq, clientRes, reqId);
+  // Opus must be cached (mp4 muxer needs seek for +faststart). FLAC may stream if asked.
+  if (spec && (!spec.streamable || BUFFER === 'disk')) {
+    log(`transcode #${reqId} mode=disk codec=${spec.cachePrefix} ${clientReq.method} ${clientReq.url} range=${clientReq.headers.range || '-'}`);
+    handleTranscodeCached(reqUrl, clientReq, clientRes, reqId, spec);
     return;
   }
 
   const dropForUpstream = new Set(HOP_BY_HOP);
-  if (willTranscode) {
+  if (spec) {
     dropForUpstream.add('range');
     dropForUpstream.add('if-range');
     dropForUpstream.add('if-none-match');
@@ -330,18 +370,20 @@ const server = http.createServer((clientReq, clientRes) => {
   const headers = copyHeaders(clientReq.headers, dropForUpstream);
   headers.host = baseUrl.host;
 
+  const upstreamPath = spec ? upstreamPathFor(reqUrl) : clientReq.url;
+
   const upstreamReq = upstreamLib.request({
     protocol: baseUrl.protocol,
     hostname: baseUrl.hostname,
     port: baseUrl.port || (baseUrl.protocol === 'https:' ? 443 : 80),
     method: clientReq.method,
-    path: clientReq.url,
+    path: upstreamPath,
     headers,
   }, (upstreamRes) => {
     dbg('<-', upstreamRes.statusCode, clientReq.method, clientReq.url);
     const ok = upstreamRes.statusCode >= 200 && upstreamRes.statusCode < 300;
-    if (ok && willTranscode) {
-      log(`transcode #${reqId} mode=stream upstream=${upstreamRes.statusCode} upstreamLen=${upstreamRes.headers['content-length'] || '?'} ${clientReq.url}`);
+    if (ok && spec) {
+      log(`transcode #${reqId} mode=stream codec=${spec.cachePrefix} upstream=${upstreamRes.statusCode} upstreamLen=${upstreamRes.headers['content-length'] || '?'} ${clientReq.url}`);
       pipeTranscodedStream(upstreamRes, clientRes, clientReq, reqId);
     } else {
       pipePassthrough(upstreamRes, clientRes);
