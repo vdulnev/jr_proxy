@@ -9,7 +9,7 @@ const { spawn } = require('child_process');
 
 const PORT = parseInt(process.env.PORT || '8081', 10);
 const FFMPEG = process.env.FFMPEG || 'ffmpeg';
-const JRIVER_BASE = process.env.JRIVER_BASE || 'http://192.168.1.116:52199';
+const JRIVER_BASE = process.env.JRIVER_BASE || 'http://127.0.0.1:52199';
 const FLAC_LEVEL = process.env.FLAC_LEVEL || '5';
 const BUFFER = (process.env.BUFFER || 'disk').toLowerCase(); // 'stream' | 'disk'
 const CACHE_DIR = process.env.CACHE_DIR || path.join(os.tmpdir(), 'jr_proxy_cache');

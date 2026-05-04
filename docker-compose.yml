@@ -1,0 +1,16 @@
+services:
+  jr-proxy:
+    build: .
+    container_name: jr-proxy
+    ports:
+      - "8081:8081"
+    environment:
+      - JRIVER_BASE=http://host.docker.internal:52199
+      - BUFFER=disk
+      - DEBUG=0
+    volumes:
+      - jr_cache:/cache
+    restart: unless-stopped
+
+volumes:
+  jr_cache:
