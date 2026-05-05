@@ -52,5 +52,6 @@ The proxy detects transcoding requests based on JRiver's `getfile` parameters:
 
 - `Conversion=opus` -> Transcoded to **Opus** (m4a).
   - Use `Quality=high` (160k), `normal` (96k), or `low` (64k).
+- `Conversion=wav` -> JRiver MCWS server will return PCM stream.
 - `Conversion=<any other value>` -> Transcoded to **FLAC**.
 - No `Conversion` parameter -> Passed through without transcoding.

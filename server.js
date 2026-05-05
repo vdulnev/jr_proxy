@@ -49,8 +49,8 @@ function copyHeaders(src, drop = HOP_BY_HOP) {
 
 function transcodeSpec(reqUrl) {
   if (!reqUrl.pathname.toLowerCase().endsWith('/mcws/v1/file/getfile')) return null;
-  if (!reqUrl.searchParams.has('Conversion')) return null;
   const conv = (reqUrl.searchParams.get('Conversion') || '').toLowerCase();
+  if (!conv || conv === 'wav') return null;
   const quality = (reqUrl.searchParams.get('Quality') || '').toLowerCase();
 
   if (conv === 'opus') {
