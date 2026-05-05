@@ -50,6 +50,7 @@ The following environment variables can be configured:
 
 The proxy detects transcoding requests based on JRiver's `getfile` parameters:
 
-- `Conversion=wav` -> Transcoded to **FLAC**.
 - `Conversion=opus` -> Transcoded to **Opus** (m4a).
   - Use `Quality=high` (160k), `normal` (96k), or `low` (64k).
+- `Conversion=<any other value>` -> Transcoded to **FLAC**.
+- No `Conversion` parameter -> Passed through without transcoding.

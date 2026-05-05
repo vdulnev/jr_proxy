@@ -49,6 +49,7 @@ function copyHeaders(src, drop = HOP_BY_HOP) {
 
 function transcodeSpec(reqUrl) {
   if (!reqUrl.pathname.toLowerCase().endsWith('/mcws/v1/file/getfile')) return null;
+  if (!reqUrl.searchParams.has('Conversion')) return null;
   const conv = (reqUrl.searchParams.get('Conversion') || '').toLowerCase();
   const quality = (reqUrl.searchParams.get('Quality') || '').toLowerCase();
 
@@ -70,20 +71,16 @@ function transcodeSpec(reqUrl) {
     };
   }
 
-  if (conv === 'wav') {
-    return {
-      ext: 'flac',
-      contentType: 'audio/flac',
-      cachePrefix: 'flac',
-      streamable: true,
-      ffmpegOutputArgs: [
-        '-f', 'flac',
-        '-compression_level', FLAC_LEVEL,
-      ],
-    };
-  }
-
-  return null;
+  return {
+    ext: 'flac',
+    contentType: 'audio/flac',
+    cachePrefix: 'flac',
+    streamable: true,
+    ffmpegOutputArgs: [
+      '-f', 'flac',
+      '-compression_level', FLAC_LEVEL,
+    ],
+  };
 }
 
 function cacheFilename(reqUrl, spec) {
