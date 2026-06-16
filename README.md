@@ -1,11 +1,11 @@
 # jr_proxy
 
-HTTP proxy that re-encodes JRiver MCWS audio streams to FLAC or Opus via FFmpeg.
+HTTP proxy that re-encodes JRiver MCWS audio streams to FLAC or MP3 via FFmpeg.
 
 ## Features
 
-- Transcodes PCM/WAV to FLAC (lossless) or Opus (lossy).
-- Disk caching for improved performance and seeking support (required for Opus/MP4).
+- Transcodes PCM/WAV to FLAC (lossless) or MP3 (lossy).
+- Disk caching for improved performance and seek/range support, or on-the-fly streaming (`BUFFER=stream`).
 - Lightweight: No external NPM dependencies.
 - Docker ready.
 
@@ -50,8 +50,8 @@ The following environment variables can be configured:
 
 The proxy detects transcoding requests based on JRiver's `getfile` parameters:
 
-- `Conversion=opus` -> Transcoded to **Opus** (m4a).
-  - Use `Quality=high` (160k), `normal` (96k), or `low` (64k).
+- `Conversion=mp3` -> Transcoded to **MP3**.
+  - Use `Quality=high` (320k), `normal` (192k), or `low` (128k).
 - `Conversion=wav` -> JRiver MCWS server will return PCM stream.
 - `Conversion=<any other value>` -> Transcoded to **FLAC**.
 - No `Conversion` parameter -> Passed through without transcoding.

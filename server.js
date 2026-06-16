@@ -20,7 +20,7 @@ fs.mkdirSync(CACHE_DIR, { recursive: true });
 function cleanCache() {
   let removed = 0;
   for (const name of fs.readdirSync(CACHE_DIR)) {
-    if (!/^(flac|opus\d+)_[a-f0-9]+\.(flac|m4a)(\.tmp\..+)?$/.test(name)) continue;
+    if (!/^(flac|mp3\d+)_[a-f0-9]+\.(flac|mp3)(\.tmp\..+)?$/.test(name)) continue;
     try { fs.unlinkSync(path.join(CACHE_DIR, name)); removed++; } catch (_) {}
   }
   if (removed) console.log(`cache cleanup: removed ${removed} file(s) from ${CACHE_DIR}`);
@@ -53,20 +53,18 @@ function transcodeSpec(reqUrl) {
   if (!conv || conv === 'wav') return null;
   const quality = (reqUrl.searchParams.get('Quality') || '').toLowerCase();
 
-  if (conv === 'opus') {
-    const bitrateMap = { high: 160, normal: 96, low: 64 };
-    const kbps = bitrateMap[quality] || 96;
+  if (conv === 'mp3') {
+    const bitrateMap = { high: 320, normal: 192, low: 128 };
+    const kbps = bitrateMap[quality] || 192;
     return {
-      ext: 'm4a',
-      contentType: 'audio/mp4',
-      cachePrefix: `opus${kbps}`,
-      streamable: false,
+      ext: 'mp3',
+      contentType: 'audio/mpeg',
+      cachePrefix: `mp3${kbps}`,
+      streamable: true,
       ffmpegOutputArgs: [
-        '-c:a', 'libopus',
+        '-c:a', 'libmp3lame',
         '-b:a', `${kbps}k`,
-        '-vbr', 'on',
-        '-movflags', '+faststart',
-        '-f', 'mp4',
+        '-f', 'mp3',
       ],
     };
   }
@@ -272,13 +270,13 @@ async function handleTranscodeCached(reqUrl, clientReq, clientRes, label, spec) 
   }
 }
 
-function pipeTranscodedStream(upstreamRes, clientRes, clientReq, label) {
+function pipeTranscodedStream(upstreamRes, clientRes, clientReq, label, spec) {
   const tag = `[ff ${label}]`;
   const ff = spawn(FFMPEG, [
     '-hide_banner', '-loglevel', 'warning',
     '-fflags', '+nobuffer',
     '-i', 'pipe:0',
-    '-f', 'flac', '-compression_level', FLAC_LEVEL,
+    ...spec.ffmpegOutputArgs,
     '-flush_packets', '1',
     'pipe:1',
   ], { stdio: ['pipe', 'pipe', 'pipe'] });
@@ -292,7 +290,7 @@ function pipeTranscodedStream(upstreamRes, clientRes, clientReq, label) {
 
   const headers = copyHeaders(upstreamRes.headers,
     new Set([...HOP_BY_HOP, 'content-length', 'content-type', 'accept-ranges', 'content-range']));
-  headers['content-type'] = 'audio/flac';
+  headers['content-type'] = spec.contentType;
   headers['cache-control'] = 'no-store';
   headers['accept-ranges'] = 'none';
 
@@ -349,7 +347,7 @@ const server = http.createServer((clientReq, clientRes) => {
   const spec = transcodeSpec(reqUrl);
   const reqId = (++reqSeq).toString(36);
 
-  // Opus must be cached (mp4 muxer needs seek for +faststart). FLAC may stream if asked.
+  // Stream when the codec supports it and BUFFER=stream; otherwise serve from the disk cache.
   if (spec && (!spec.streamable || BUFFER === 'disk')) {
     log(`transcode #${reqId} mode=disk codec=${spec.cachePrefix} ${clientReq.method} ${clientReq.url} range=${clientReq.headers.range || '-'}`);
     handleTranscodeCached(reqUrl, clientReq, clientRes, reqId, spec);
@@ -381,7 +379,7 @@ const server = http.createServer((clientReq, clientRes) => {
     const ok = upstreamRes.statusCode >= 200 && upstreamRes.statusCode < 300;
     if (ok && spec) {
       log(`transcode #${reqId} mode=stream codec=${spec.cachePrefix} upstream=${upstreamRes.statusCode} upstreamLen=${upstreamRes.headers['content-length'] || '?'} ${clientReq.url}`);
-      pipeTranscodedStream(upstreamRes, clientRes, clientReq, reqId);
+      pipeTranscodedStream(upstreamRes, clientRes, clientReq, reqId, spec);
     } else {
       pipePassthrough(upstreamRes, clientRes);
     }
